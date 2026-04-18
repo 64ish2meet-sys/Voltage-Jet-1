@@ -1,2 +1,327 @@
-# Voltage-Jet-1
-**Voltage Jet 1** is a high-speed arcade survival scroller. Pilot your orange scout ship through lethal neon voltage gates in deep space. Featuring one-touch controls, dynamic starfields, and retro audio, it’s a test of pure reflexes. Dodge obstacles, save your high score, and see how long you can survive.
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Voltage Jet 1</title>
+    <style>
+        body,
+        html {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background-color: #000;
+            touch-action: none;
+            font-family: sans-serif;
+        }
+
+        #game-container {
+            position: relative;
+            width: 100vw;
+            height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+
+        canvas {
+            display: block;
+            background: #05070a;
+        }
+
+        #ui {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            pointer-events: none;
+            color: white;
+        }
+
+        .msg-box {
+            background: rgba(0, 0, 0, 0.85);
+            padding: 30px;
+            border: 3px solid #4ee2f3;
+            border-radius: 20px;
+            text-align: center;
+            box-shadow: 0 0 30px rgba(78, 226, 243, 0.4);
+        }
+
+        h1 {
+            color: #4ee2f3;
+            margin: 0;
+            font-size: 2rem;
+            text-shadow: 0 0 10px #4ee2f3;
+        }
+
+        .tap-msg {
+            margin-top: 20px;
+            font-weight: bold;
+            animation: blink 1s infinite;
+        }
+
+        @keyframes blink {
+            0% {
+                opacity: 1;
+            }
+
+            50% {
+                opacity: 0.3;
+            }
+
+            100% {
+                opacity: 1;
+            }
+        }
+
+        #score {
+            position: absolute;
+            top: 20px;
+            font-size: 4rem;
+            opacity: 0.2;
+        }
+
+        .high-score-text {
+            font-size: 0.9rem;
+            margin-top: 10px;
+            color: #4ee2f3;
+        }
+    </style>
+</head>
+
+<body>
+
+    <div id="game-container">
+        <canvas id="gameCanvas"></canvas>
+        <div id="ui">
+            <div id="score">0</div>
+
+            <div id="start-screen" class="msg-box">
+                <h1>VOLTAGE JET 1</h1>
+                <div id="best-display" class="high-score-text">BEST: 0</div>
+                <div class="tap-msg">TAP ANYWHERE TO START</div>
+            </div>
+
+            <div id="game-over" class="msg-box" style="display: none;">
+                <h1 style="color: #ff4444;">CRASHED</h1>
+                <p id="final-score">SCORE: 0</p>
+                <p id="best-score-report" style="color: #4ee2f3; font-weight: bold;">BEST: 0</p>
+                <div class="tap-msg">TAP TO TRY AGAIN</div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+
+        // Audio System
+        let audioCtx = null;
+        function beep(f, t = 'sine', d = 0.1) {
+            if (!audioCtx) return;
+            const osc = audioCtx.createOscillator();
+            const g = audioCtx.createGain();
+            osc.type = t;
+            osc.frequency.setValueAtTime(f, audioCtx.currentTime);
+            g.gain.setValueAtTime(0.05, audioCtx.currentTime);
+            g.gain.linearRampToValueAtTime(0, audioCtx.currentTime + d);
+            osc.connect(g); g.connect(audioCtx.destination);
+            osc.start(); osc.stop(audioCtx.currentTime + d);
+        }
+
+        // Game Constants
+        const jet = { x: 0, y: 0, w: 50, h: 40, v: 0, gravity: 0.26, lift: -5.5 };
+        let pillars = [];
+        let stars = []; // Array for background dots
+        let score = 0;
+        let highscore = parseInt(localStorage.getItem('vj1_highscore')) || 0;
+        let state = 'START'; // START, PLAY, OVER
+        let frame = 0;
+
+        // Create initial stars
+        function createStars() {
+            stars = [];
+            for (let i = 0; i < 80; i++) {
+                stars.push({
+                    x: Math.random() * canvas.width,
+                    y: Math.random() * canvas.height,
+                    size: Math.random() * 2,
+                    speed: Math.random() * 1 + 0.5
+                });
+            }
+        }
+
+        // Show initial highscore
+        document.getElementById('best-display').innerText = 'BEST: ' + highscore;
+
+        function resize() {
+            canvas.width = Math.min(window.innerWidth, 500);
+            canvas.height = window.innerHeight;
+            jet.x = canvas.width * 0.2;
+            createStars();
+        }
+
+        function initGame() {
+            if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            if (audioCtx.state === 'suspended') audioCtx.resume();
+
+            state = 'PLAY';
+            score = 0;
+            frame = 0;
+            pillars = [];
+            jet.y = canvas.height / 2;
+            jet.v = 0;
+
+            document.getElementById('start-screen').style.display = 'none';
+            document.getElementById('game-over').style.display = 'none';
+            document.getElementById('score').innerText = '0';
+            beep(400);
+        }
+
+        function gameOver() {
+            state = 'OVER';
+
+            // Save high score
+            if (score > highscore) {
+                highscore = score;
+                localStorage.setItem('vj1_highscore', highscore);
+            }
+
+            document.getElementById('game-over').style.display = 'block';
+            document.getElementById('final-score').innerText = 'SCORE: ' + score;
+            document.getElementById('best-score-report').innerText = 'BEST: ' + highscore;
+            document.getElementById('best-display').innerText = 'BEST: ' + highscore;
+            beep(100, 'sawtooth', 0.3);
+        }
+
+        function spawnPillar() {
+            const gap = 190;
+            const h = Math.random() * (canvas.height - gap - 120) + 60;
+            pillars.push({ x: canvas.width, h: h, passed: false });
+        }
+
+        function update() {
+            // Update background stars always
+            stars.forEach(s => {
+                s.x -= s.speed;
+                if (s.x < 0) s.x = canvas.width;
+            });
+
+            if (state !== 'PLAY') return;
+
+            frame++;
+            jet.v += jet.gravity;
+            jet.y += jet.v;
+
+            if (jet.y < 0 || jet.y + jet.h > canvas.height) gameOver();
+
+            if (frame % 90 === 0) spawnPillar();
+
+            for (let i = pillars.length - 1; i >= 0; i--) {
+                const p = pillars[i];
+                p.x -= 3.5;
+
+                // Collision
+                if (jet.x + jet.w - 5 > p.x && jet.x + 5 < p.x + 70) {
+                    if (jet.y + 5 < p.h || jet.y + jet.h - 5 > p.h + 190) {
+                        gameOver();
+                    }
+                }
+
+                // Score
+                if (!p.passed && p.x < jet.x) {
+                    p.passed = true;
+                    score++;
+                    document.getElementById('score').innerText = score;
+                    beep(800);
+                }
+
+                if (p.x < -80) pillars.splice(i, 1);
+            }
+        }
+
+        function draw() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            // Draw background white dots (Stars)
+            ctx.fillStyle = "white";
+            stars.forEach(s => {
+                ctx.beginPath();
+                ctx.arc(s.x, s.y, s.size, 0, Math.PI * 2);
+                ctx.fill();
+            });
+
+            // Pillars
+            pillars.forEach(p => {
+                ctx.fillStyle = '#1a1a1a';
+                ctx.strokeStyle = '#4ee2f3';
+                ctx.lineWidth = 2;
+                ctx.fillRect(p.x, 0, 70, p.h);
+                ctx.strokeRect(p.x, -2, 70, p.h + 2);
+                ctx.fillRect(p.x, p.h + 190, 70, canvas.height);
+                ctx.strokeRect(p.x, p.h + 190, 70, canvas.height);
+            });
+
+            // Ship
+            ctx.save();
+            ctx.translate(jet.x, jet.y);
+
+            // Boost
+            if (state === 'PLAY' && jet.v < 0) {
+                ctx.fillStyle = '#4ee2f3';
+                ctx.beginPath();
+                ctx.moveTo(0, 15); ctx.lineTo(-20, 20); ctx.lineTo(0, 25);
+                ctx.fill();
+            }
+
+            // Hull (Orange)
+            ctx.fillStyle = '#f38d4e';
+            ctx.strokeStyle = 'white';
+            ctx.beginPath();
+            ctx.ellipse(25, 20, 25, 15, 0, 0, Math.PI * 2);
+            ctx.fill(); ctx.stroke();
+
+            // Fins
+            ctx.fillStyle = 'white';
+            ctx.fillRect(5, 0, 10, 8); ctx.fillRect(5, 32, 10, 8);
+            ctx.restore();
+
+            if (state === 'START') {
+                jet.y = canvas.height / 2 + Math.sin(Date.now() / 200) * 15;
+            }
+
+            requestAnimationFrame(draw);
+        }
+
+        function handleInput(e) {
+            if (e) e.preventDefault();
+
+            if (state === 'START' || state === 'OVER') {
+                initGame();
+            } else if (state === 'PLAY') {
+                jet.v = jet.lift;
+                beep(300, 'triangle', 0.05);
+            }
+        }
+
+        window.addEventListener('mousedown', handleInput);
+        window.addEventListener('touchstart', handleInput, { passive: false });
+        window.addEventListener('resize', resize);
+
+        resize();
+        setInterval(update, 1000 / 60);
+        draw();
+    </script>
+</body>
+
+</html>
+
+```
